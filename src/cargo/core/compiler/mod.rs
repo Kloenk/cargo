@@ -96,14 +96,17 @@ impl Executor for DefaultExecutor {
     fn exec(
         &self,
         cmd: &ProcessBuilder,
-        _id: PackageId,
+        id: PackageId,
         _target: &Target,
         _mode: CompileMode,
         on_stdout_line: &mut dyn FnMut(&str) -> CargoResult<()>,
         on_stderr_line: &mut dyn FnMut(&str) -> CargoResult<()>,
     ) -> CargoResult<()> {
+        //println!("start build with id: {:?}", cmd);
+        
         cmd.exec_with_streaming(on_stdout_line, on_stderr_line, false)
             .map(drop)
+        //Ok(())
     }
 }
 

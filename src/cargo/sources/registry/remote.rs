@@ -281,6 +281,8 @@ impl<'cfg> RegistryData for RemoteRegistry<'cfg> {
             .replace(PREFIX_TEMPLATE, &prefix)
             .replace(LOWER_PREFIX_TEMPLATE, &prefix.to_lowercase());
 
+        println!("download: {}", url);
+
         Ok(MaybeLock::Download {
             url,
             descriptor: pkg.to_string(),
