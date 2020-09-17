@@ -65,6 +65,8 @@ pub mod toml;
 mod vcs;
 mod workspace;
 
+pub mod nix;
+
 pub fn elapsed(duration: Duration) -> String {
     let secs = duration.as_secs();
 

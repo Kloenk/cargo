@@ -177,6 +177,7 @@ use crate::core::{Package, PackageId, Source, SourceId, Summary};
 use crate::sources::PathSource;
 use crate::util::errors::CargoResultExt;
 use crate::util::hex;
+use crate::util::nix;
 use crate::util::interning::InternedString;
 use crate::util::into_url::IntoUrl;
 use crate::util::{restricted_names, CargoResult, Config, Filesystem};
@@ -559,6 +560,11 @@ impl<'cfg> RegistrySource<'cfg> {
 
         Ok(pkg)
     }
+
+    fn get_nix_pkg(&mut self, package: PackageId, drv: nix::download::Download) -> CargoResult<Package> {
+        drv.build()?;
+        todo!("foobar")
+    }
 }
 
 impl<'cfg> Source for RegistrySource<'cfg> {
@@ -631,7 +637,13 @@ impl<'cfg> Source for RegistrySource<'cfg> {
         match self.ops.download(package, hash)? {
             MaybeLock::Ready(file) => self.get_pkg(package, &file).map(MaybePackage::Ready),
             MaybeLock::Download { url, descriptor } => {
-                Ok(MaybePackage::Download { url, descriptor })
+                if nix::is_nix_installed()? {
+                  //Ok(MaybePackage::NixBuild{ url, descriptor, hash: hash.to_string()})
+                  let drv = nix::download::Download::url(url, descriptor, hash.to_string())?;
+                  self.get_nix_pkg(package, drv).map(MaybePackage::Ready)
+                } else {
+                  Ok(MaybePackage::Download { url, descriptor })
+                }
             }
         }
     }
