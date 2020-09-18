@@ -562,7 +562,7 @@ impl<'cfg> RegistrySource<'cfg> {
     }
 
     fn get_nix_pkg(&mut self, package: PackageId, drv: nix::download::Download) -> CargoResult<Package> {
-        let path = drv.build()?;
+        let path = drv.build(self.config)?;
         let mut src = PathSource::new(&path, self.source_id, self.config);
         src.update()?;
         let mut pkg = match src.download(package)? {
