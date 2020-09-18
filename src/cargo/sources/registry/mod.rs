@@ -562,8 +562,30 @@ impl<'cfg> RegistrySource<'cfg> {
     }
 
     fn get_nix_pkg(&mut self, package: PackageId, drv: nix::download::Download) -> CargoResult<Package> {
-        drv.build()?;
-        todo!("foobar")
+        let path = drv.build()?;
+        let mut src = PathSource::new(&path, self.source_id, self.config);
+        src.update()?;
+        let mut pkg = match src.download(package)? {
+            MaybePackage::Ready(pkg) => pkg,
+            MaybePackage::Download { .. } => unreachable!(),
+        };
+
+        // After we've loaded the package configure its summary's `checksum`
+        // field with the checksum we know for this `PackageId`.
+        let req = VersionReq::exact(package.version());
+        let summary_with_cksum = self
+            .index
+            .summaries(package.name(), &req, &mut *self.ops)?
+            .map(|s| s.summary.clone())
+            .next()
+            .expect("summary not found");
+        if let Some(cksum) = summary_with_cksum.checksum() {
+            pkg.manifest_mut()
+                .summary_mut()
+                .set_checksum(cksum.to_string());
+        }
+
+        Ok(pkg)
     }
 }
 
@@ -639,7 +661,7 @@ impl<'cfg> Source for RegistrySource<'cfg> {
             MaybeLock::Download { url, descriptor } => {
                 if nix::is_nix_installed()? {
                   //Ok(MaybePackage::NixBuild{ url, descriptor, hash: hash.to_string()})
-                  let drv = nix::download::Download::url(url, descriptor, hash.to_string())?;
+                  let drv = nix::download::Download::registry(url, descriptor, hash.to_string())?;
                   self.get_nix_pkg(package, drv).map(MaybePackage::Ready)
                 } else {
                   Ok(MaybePackage::Download { url, descriptor })
