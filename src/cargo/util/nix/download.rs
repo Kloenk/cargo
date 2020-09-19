@@ -1,15 +1,47 @@
 use std::path::PathBuf;
+use std::process::Command;
 
 use super::CargoResult;
 use super::super::Config;
 use anyhow::{bail, Context};
 
-pub enum Download {
-    Registry{
+pub struct Download {
+    inner: InnerDownload,
+    //hash: String,
+    descriptor: String,
+}
+
+enum InnerDownload {
+    Url{
         url: String,
         hash: String,
-        descriptor: String,
     },
+}
+
+impl InnerDownload {
+    /// returns if the Crate source send the crate in an archive
+    pub fn packed(&self) -> bool {
+        match self {
+            InnerDownload::Url{ .. } => true,
+        }
+    }
+
+    pub fn expr(&self, descriptor: &str) -> CargoResult<String> {
+        match self {
+            InnerDownload::Url{ url, hash } => {
+              let (name, _) = descripe(descriptor)?;
+              Ok(format!("let pkgs = import <nixpkgs> {{}}; cratePacked = pkgs.fetchurl {{ url = \"{}\"; sha256 = \"{}\"; name = \"{}.crate\"; }}; crate = pkgs.runCommandNoCC \"{}\" {{}} \"mkdir -p $out; tar xvf ${{cratePacked}} -C $out --strip-components=1; echo -n ok > $out/.cargo-ok\"; in ", url, hash, name, name))
+            },
+        }
+    }
+}
+
+fn descripe(descriptor: &str) -> CargoResult<(String, String)> {
+          let descriptor: Vec<&str> = descriptor.split(' ').collect();
+          if descriptor.len() != 2 {
+              bail!("BUG: descriptor does not have to elements");
+          }
+          Ok((descriptor[0].to_string(), descriptor[1][1..].to_string()))
 }
 
 impl Download {
@@ -18,47 +50,52 @@ impl Download {
             bail!("Not a sha256 sum error")
         }
 
-        Ok(Download::Registry {
-            url, descriptor, hash
+        Ok(Self {
+            descriptor,
+            inner: InnerDownload::Url{ url, hash },
         })
     }
 
-    fn expr_registry(&self, unpack: bool) -> CargoResult<(String, String)> {
-        if let Download::Registry{url, descriptor, hash} = self {
-          if hash.len() != 64 {
-              bail!("Not a sha256 sum error")
-          }
-          let name = descriptor.split(' ').next().context("could not get name from descriptor")?;
 
-          let vars = format!("let pkgs = import <nixpkgs> {{}}; crate = pkgs.fetchurl {{ url = \"{}\"; sha256 = \"{}\"; name = \"{}.crate\"; }}; in", url, hash, name);
+    pub fn expr(&self, unpack: bool) -> CargoResult<String> {
+        if !self.inner.packed() && unpack {
+            bail!("BUG: cannot unpack a non packed crate");
+        }
+        let mut expr = self.inner.expr(&self.descriptor)?;
 
-          Ok(match unpack {
-              true => (format!("{} pkgs.runCommandNoCC \"{}\" {{}} \"mkdir -p $out; tar xvf ${{crate}} -C $out --strip-components=1\"", vars, name), name.to_string()),
-              false => (format!("{} crate", vars), name.to_string()),
-          })
+        if unpack {
+            expr.push_str("crate");
         } else {
-            bail!("BUG: not a Registry derivation");
+            expr.push_str("cratePacked");
         }
-    }
 
-    pub fn expr(&self, unpack: bool) -> CargoResult<(String, String)> {
-        match self {
-            Download::Registry{ .. } => self.expr_registry(unpack)
-        }
+        Ok(expr)
     }
 
     /// downloads and unpacks a package via nix
     pub fn build(&self, config: &Config) -> CargoResult<PathBuf> {
-        let (expr, name) = self.expr(true)?;
+        let expr = self.expr(self.inner.packed())?;
         println!("expr: {}", expr);
 
         println!("TODO: implement nix build call");
-        let path = config.registry_cache_path().join(name);
+        let (name, version) = descripe(&self.descriptor)?;
+        let path = config.registry_source_path().join(format!("{}-{}", name, version));
         println!("path: {}", path.display());
+
+        let mut cmd = Command::new("nix")
+            .arg("build")
+            .arg("--impure")
+            .arg("--out-link")
+            .arg(path.display().to_string())
+            .arg("--expr")
+            .arg(expr)
+            .spawn()?;
+
+        cmd.wait()?;
 
         //Ok(PathBuf::from("/home/kloenk/.cargo/registry/src/github.com-1ecc6299db9ec823/aho-corasick-0.7.13/"))
 
-        todo!("realize")
+        Ok(path.into_path_unlocked())
     }
 
 }
